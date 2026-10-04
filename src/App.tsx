@@ -1,35 +1,50 @@
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 
+import { db } from './firebase';
+
+type DoseStatus = 'taken' | 'missed';
+
 type Dose = {
-  medicine_id: number;
-  medicine_time_id: number;
+  key: string;
+  medicineId: string;
   name: string;
   notes?: string;
   time: string;
-  status?: 'taken' | 'missed';
-  actual_taken_at?: string;
+  status?: DoseStatus;
+  actualTakenAt?: string | null;
 };
 
-type Med = {
-  id: number;
+type Medicine = {
+  id: string;
   name: string;
   notes?: string;
-  active: number;
-  start_date?: string;
-  end_date?: string;
+  active: boolean;
+  startDate?: string;
+  endDate?: string;
   times: string[];
 };
 
 const localDate = () => {
-  const d = new Date();
-  const offset = d.getTimezoneOffset();
-  return new Date(d.getTime() - offset * 60000).toISOString().slice(0, 10);
+  const date = new Date();
+  const offset = date.getTimezoneOffset();
+  return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 10);
 };
 
 const localDateTime = () => {
-  const d = new Date();
-  const offset = d.getTimezoneOffset();
-  return new Date(d.getTime() - offset * 60000).toISOString().slice(0, 16);
+  const date = new Date();
+  const offset = date.getTimezoneOffset();
+  return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16);
 };
 
 const formatTime = (time: string) =>
@@ -38,28 +53,66 @@ const formatTime = (time: string) =>
     minute: '2-digit',
   });
 
-const api = async (url: string, options?: RequestInit) => {
-  const response = await fetch(url, options);
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.error || 'Request failed');
-  }
-
-  return data;
-};
+const doseId = (medicineId: string, date: string, time: string) =>
+  [date, medicineId, time.replace(':', '')].join('_');
 
 export default function App() {
-  const [tab, setTab] = useState<'today' | 'meds'>('today');
+  const [tab, setTab] = useState<'today' | 'medicines'>('today');
   const [doses, setDoses] = useState<Dose[]>([]);
-  const [medicines, setMedicines] = useState<Med[]>([]);
+  const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [actualTakenAt, setActualTakenAt] = useState(localDateTime());
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<Partial<Med> | null>(null);
+  const [editing, setEditing] = useState<Partial<Medicine> | null>(null);
+  const [error, setError] = useState('');
 
   const load = async () => {
-    setDoses(await api('/api/day?date=' + localDate()));
-    setMedicines(await api('/api/medicines'));
+    setError('');
+    const today = localDate();
+
+    try {
+      const [medicineSnapshot, logSnapshot] = await Promise.all([
+        getDocs(collection(db, 'medicines')),
+        getDocs(query(collection(db, 'doseLogs'), where('scheduledDate', '==', today))),
+      ]);
+
+      const medicineList = medicineSnapshot.docs
+        .map((snapshot) => ({ id: snapshot.id, ...snapshot.data() }) as Medicine)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      const logs = new Map(
+        logSnapshot.docs.map((snapshot) => [snapshot.id, snapshot.data()]),
+      );
+
+      const dayDoses = medicineList
+        .filter(
+          (medicine) =>
+            medicine.active &&
+            (!medicine.startDate || medicine.startDate <= today) &&
+            (!medicine.endDate || medicine.endDate >= today),
+        )
+        .flatMap((medicine) =>
+          [...medicine.times].sort().map((time) => {
+            const key = doseId(medicine.id, today, time);
+            const log = logs.get(key);
+
+            return {
+              key,
+              medicineId: medicine.id,
+              name: medicine.name,
+              notes: medicine.notes,
+              time,
+              status: log?.status as DoseStatus | undefined,
+              actualTakenAt: log?.actualTakenAt,
+            };
+          }),
+        )
+        .sort((a, b) => a.time.localeCompare(b.time) || a.name.localeCompare(b.name));
+
+      setMedicines(medicineList);
+      setDoses(dayDoses);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load medicines.');
+    }
   };
 
   useEffect(() => {
@@ -75,42 +128,70 @@ export default function App() {
 
   useEffect(() => {
     setActualTakenAt(localDateTime());
-  }, [next?.medicine_id, next?.time]);
+  }, [next?.key]);
 
-  const mark = async (dose: Dose, status: 'taken' | 'missed') => {
+  const mark = async (dose: Dose, status: DoseStatus) => {
     setBusy(true);
+    setError('');
 
     try {
-      await api('/api/doses', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ...dose,
-          scheduled_date: localDate(),
-          scheduled_time: dose.time,
-          status,
-          actual_taken_at:
-            status === 'taken' ? new Date(actualTakenAt).toISOString() : null,
-        }),
+      await setDoc(doc(db, 'doseLogs', dose.key), {
+        medicineId: dose.medicineId,
+        scheduledDate: localDate(),
+        scheduledTime: dose.time,
+        status,
+        actualTakenAt: status === 'taken' ? new Date(actualTakenAt).toISOString() : null,
+        updatedAt: new Date().toISOString(),
       });
       await load();
+    } catch (markError) {
+      setError(markError instanceof Error ? markError.message : 'Unable to save dose.');
     } finally {
       setBusy(false);
     }
   };
 
-  const save = async () => {
-    if (!editing?.name || !editing.times?.length) return;
+  const saveMedicine = async () => {
+    if (!editing?.name?.trim() || !editing.times?.length) return;
 
     setBusy(true);
+    setError('');
+
+    const data = {
+      name: editing.name.trim(),
+      notes: editing.notes?.trim() || '',
+      active: editing.active ?? true,
+      startDate: editing.startDate || '',
+      endDate: editing.endDate || '',
+      times: [...new Set(editing.times)].sort(),
+      updatedAt: new Date().toISOString(),
+    };
 
     try {
-      const body = JSON.stringify({ ...editing, active: editing.active ?? 1 });
-      await api(editing.id ? '/api/medicines/' + editing.id : '/api/medicines', {
-        method: editing.id ? 'PUT' : 'POST',
-        headers: { 'content-type': 'application/json' },
-        body,
-      });
+      if (editing.id) {
+        await updateDoc(doc(db, 'medicines', editing.id), data);
+      } else {
+        await addDoc(collection(db, 'medicines'), {
+          ...data,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      setEditing(null);
+      await load();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save medicine.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeMedicine = async () => {
+    if (!editing?.id) return;
+
+    setBusy(true);
+    try {
+      await deleteDoc(doc(db, 'medicines', editing.id));
       setEditing(null);
       await load();
     } finally {
@@ -132,12 +213,16 @@ export default function App() {
           </p>
         </div>
         <button
-          onClick={() => setTab(tab === 'today' ? 'meds' : 'today')}
+          onClick={() => setTab(tab === 'today' ? 'medicines' : 'today')}
           className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm"
         >
           {tab === 'today' ? 'Manage' : 'Today'}
         </button>
       </header>
+
+      {error && (
+        <div className="mb-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</div>
+      )}
 
       {tab === 'today' ? (
         <>
@@ -156,20 +241,17 @@ export default function App() {
                 </div>
               </div>
 
-              <label className="mt-7 block text-sm text-slate-500">
-                Actually taken at
-              </label>
+              <label className="mt-7 block text-sm text-slate-500">Actually taken at</label>
               <input
                 type="datetime-local"
                 value={actualTakenAt}
                 onChange={(event) => setActualTakenAt(event.target.value)}
                 className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-base"
               />
-
               <button
                 disabled={busy}
                 onClick={() => mark(next, 'taken')}
-                className="mt-4 w-full rounded-2xl bg-slate-900 py-4 text-lg font-semibold text-white"
+                className="mt-4 w-full rounded-2xl bg-slate-900 py-4 text-lg font-semibold text-white disabled:opacity-50"
               >
                 ✓ Confirm taken
               </button>
@@ -191,8 +273,8 @@ export default function App() {
           <section>
             <h3 className="mb-3 font-semibold">Today's schedule</h3>
             <div className="divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-white">
-              {doses.map((dose, index) => (
-                <div key={index} className="flex items-center gap-3 px-4 py-3">
+              {doses.map((dose) => (
+                <div key={dose.key} className="flex items-center gap-3 px-4 py-3">
                   <span className="w-20 text-sm font-medium">{formatTime(dose.time)}</span>
                   <span className={'flex-1 ' + (dose.status ? 'text-slate-400' : '')}>
                     {dose.name}
@@ -225,7 +307,9 @@ export default function App() {
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Medicines & schedules</h2>
             <button
-              onClick={() => setEditing({ name: '', notes: '', times: ['08:00'], active: 1 })}
+              onClick={() =>
+                setEditing({ name: '', notes: '', times: ['08:00'], active: true })
+              }
               className="rounded-xl bg-slate-900 px-4 py-2 text-sm text-white"
             >
               + Add
@@ -248,7 +332,10 @@ export default function App() {
                       {medicine.times.map(formatTime).join(' · ')}
                     </p>
                   </div>
-                  <button onClick={() => setEditing({ ...medicine })} className="text-sm font-medium">
+                  <button
+                    onClick={() => setEditing({ ...medicine })}
+                    className="text-sm font-medium"
+                  >
                     Edit
                   </button>
                 </div>
@@ -327,8 +414,8 @@ export default function App() {
                 <label className="text-xs text-slate-500">Start date (optional)</label>
                 <input
                   type="date"
-                  value={editing.start_date || ''}
-                  onChange={(event) => setEditing({ ...editing, start_date: event.target.value })}
+                  value={editing.startDate || ''}
+                  onChange={(event) => setEditing({ ...editing, startDate: event.target.value })}
                   className="mt-1 w-full rounded-xl border border-slate-200 p-3"
                 />
               </div>
@@ -336,8 +423,8 @@ export default function App() {
                 <label className="text-xs text-slate-500">End date (optional)</label>
                 <input
                   type="date"
-                  value={editing.end_date || ''}
-                  onChange={(event) => setEditing({ ...editing, end_date: event.target.value })}
+                  value={editing.endDate || ''}
+                  onChange={(event) => setEditing({ ...editing, endDate: event.target.value })}
                   className="mt-1 w-full rounded-xl border border-slate-200 p-3"
                 />
               </div>
@@ -348,9 +435,7 @@ export default function App() {
                 <input
                   type="checkbox"
                   checked={!!editing.active}
-                  onChange={(event) =>
-                    setEditing({ ...editing, active: event.target.checked ? 1 : 0 })
-                  }
+                  onChange={(event) => setEditing({ ...editing, active: event.target.checked })}
                 />
                 Active
               </label>
@@ -358,11 +443,21 @@ export default function App() {
 
             <button
               disabled={busy || !editing.name || !editing.times?.length}
-              onClick={save}
+              onClick={saveMedicine}
               className="mt-5 w-full rounded-2xl bg-slate-900 py-4 font-semibold text-white disabled:opacity-40"
             >
               Save medicine
             </button>
+
+            {editing.id && (
+              <button
+                disabled={busy}
+                onClick={removeMedicine}
+                className="mt-2 w-full py-3 text-sm text-rose-600"
+              >
+                Remove medicine
+              </button>
+            )}
           </div>
         </div>
       )}
