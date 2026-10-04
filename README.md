@@ -1,47 +1,62 @@
 # Medicine Tracker
 
-A distraction-free medicine schedule and dose tracker using React, Cloudflare Workers, and D1.
+A distraction-free medicine schedule and dose tracker built with React, Firebase Hosting, and Cloud Firestore.
 
-## Included
+## Features
 
-- Next medicine is the primary UI.
-- Confirm taken with the current date/time by default, or adjust the actual time.
-- Mark doses missed.
-- Today's schedule/status list.
-- Add, edit, and deactivate medicines.
-- Add, remove, and edit any number of daily times.
-- Optional prescription start/end dates.
-- D1 history of taken/missed doses.
-- Seed data for Mofo DX (6x), SofiRx Ultra (4x), and CyclopRx (3x).
+- Upcoming medicine is the main focus.
+- Confirm a dose as taken; the current date/time is used by default.
+- Change the actual time a dose was taken.
+- Mark a dose as missed.
+- Add, edit, activate/deactivate, or remove medicines.
+- Add/remove any number of daily dose times.
+- Optional start/end dates for short prescriptions.
+- Dose history is stored in Firestore.
 
-## D1 configuration
+## Firebase configuration
 
-The repository deliberately does **not** contain the D1 database name or database ID.
+Create a Firebase web app and Firestore database. Copy `.env.example` to `.env.local` and fill in the Firebase web-app configuration values.
 
-The Worker expects a D1 binding named `DB`. Configure that binding in the Cloudflare dashboard for the deployed Worker and select the D1 database there. The application only accesses `env.DB`; it does not need to know the database name or ID.
+For repository-based deployment, configure the same `VITE_FIREBASE_*` variables in the build environment rather than committing a real `.env` file.
 
-Apply the SQL files in `migrations/` to the D1 database using the Cloudflare dashboard or Wrangler with the database selected/configured outside this repository.
+The Firebase web configuration is not a server secret, but keeping environment-specific project configuration outside the source tree makes it easy to use different Firebase projects for development and production.
 
-## Cloudflare deployment
+## Firestore
 
-1. Run `npm install`.
-2. Create/select your D1 database in Cloudflare.
-3. Apply the files in `migrations/` in order.
-4. Connect this GitHub repository in Cloudflare Workers Builds.
-5. Build command: `npm run build`.
-6. Deploy command: `npx wrangler deploy`.
-7. In the Worker's bindings/settings, add the D1 database with variable name `DB`.
+The app uses two top-level collections:
+
+- `medicines` — medicine details, active state, prescription dates, and daily schedule times.
+- `doseLogs` — one document per scheduled dose/day containing taken/missed status and actual taken time.
+
+Because authentication is intentionally not implemented yet, `firestore.rules` currently allows public access to these two collections. This is appropriate only for the requested no-auth prototype. Add Firebase Authentication and restrictive rules before storing private/multi-user data.
+
+There is no database migration step. Add the initial medicines through the UI after deployment.
+
+## Local development
+
+```sh
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+## Build
+
+```sh
+npm run build
+```
+
+The production output is written to `dist/`.
+
+## Git repository deployment
+
+The repository includes `firebase.json` for Firebase Hosting. Configure your Firebase Hosting GitHub integration to build the repository and deploy `dist/`. Add the `VITE_FIREBASE_*` values to the deployment/build environment.
+
+The Hosting configuration rewrites all routes to `index.html` for the React single-page application.
 
 ## Formatting
 
-Run:
-
 ```sh
 npm run format
-```
-
-Check formatting without changing files:
-
-```sh
 npm run format:check
 ```
