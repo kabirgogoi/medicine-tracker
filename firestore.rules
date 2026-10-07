@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // This app intentionally has no authentication yet. Anyone who can reach
+    // the Firebase project can read/write these collections. Add Firebase Auth
+    // and restrict these rules before using the app for multiple/private users.
+    match /medicines/{medicineId} {
+      allow read, write: if true;
+    }
+
+    match /doseLogs/{doseId} {
+      allow read, write: if true;
+    }
+  }
+}
