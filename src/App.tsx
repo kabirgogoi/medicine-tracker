@@ -285,17 +285,17 @@ export default function App() {
                       (dose.status === 'taken'
                         ? 'text-emerald-600'
                         : dose.status === 'missed'
-                        ? 'text-rose-500'
-                        : 'text-slate-400')
+                          ? 'text-rose-500'
+                          : 'text-slate-400')
                     }
                   >
                     {dose.status === 'taken'
                       ? 'Taken'
                       : dose.status === 'missed'
-                      ? 'Missed'
-                      : dose.time < now
-                        ? 'Due'
-                        : 'Upcoming'}
+                        ? 'Missed'
+                        : dose.time < now
+                          ? 'Due'
+                          : 'Upcoming'}
                   </span>
                 </div>
               ))}
