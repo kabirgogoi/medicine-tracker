@@ -91,7 +91,6 @@ GitHub Actions uses Node.js 22. The build steps are:
 
 ```sh
 npm install
-npm run format:check
 npm run build
 ```
 
