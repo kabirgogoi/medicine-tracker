@@ -79,7 +79,7 @@ The workflows request `contents: read`, and the Hosting deployment workflow also
 
 ## CI/CD behavior
 
-- **Pull request to `main`:** installs dependencies, checks Prettier formatting, type-checks/builds the Vite app, and deploys a temporary Firebase Hosting preview channel.
+- **Pull request to `main`:** installs dependencies, type-checks/builds the Vite app, and deploys a temporary Firebase Hosting preview channel.
 - **Push to `main`:** repeats the checks/build and deploys Firebase Hosting to the live channel. It also deploys `firestore.rules`.
 - **No workflow merges pull requests.** Production deployment happens only after the repository owner manually merges a PR into `main`.
 
@@ -128,11 +128,3 @@ The repository contains `firestore.rules`. Review those rules whenever authentic
 The repository includes `firebase.json` with `dist/` as the Hosting public directory and an SPA rewrite to `index.html`.
 
 The GitHub workflow uses Firebase Hosting preview channels for pull requests and the live channel for pushes to `main`. Firestore rules are deployed only from `main`.
-
-## Formatting
-
-Prettier is enforced by CI:
-
-```sh
-npm run format:check
-```
