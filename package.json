@@ -6,9 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "preview": "vite preview"
   },
   "dependencies": {
     "@tailwindcss/vite": "latest",
@@ -19,8 +17,5 @@
     "tailwindcss": "latest",
     "typescript": "latest",
     "vite": "latest"
-  },
-  "devDependencies": {
-    "prettier": "latest"
   }
 }
